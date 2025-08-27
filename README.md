@@ -85,3 +85,9 @@ jepebu@Ubuntu-Server:~$ Terminal 2 -
 
 #### There are many more niche examples for many more niche scenarios, but I think this gets the point across.
 
+## Planned additions
+- build
+- - After I decide how I want to format the build files, this command will be used to generate installation media for a project from its given build file.
+- rollback
+- - This will handle unzipping a previous version of the project and re-establishing it as the main project version.
+
