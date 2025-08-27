@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import subprocess
+import argparse
+
+
+BUILD_TEMPLATE = """
+###########################################
+### THIS IS A PLACEHOLDER QPM BUILD FILE ###
+###########################################
+"""
+
+
+class Project:
+  def __init__(self, name=None, version=None, build=None, info_file=None, root=os.environ['HOME']):
+    self.name = name
+    self.version = version
+    self.root = root
+    self.build = build
+    self.root = root
+    self.info_file = info_file
+
+  def __repr__(self):
+    return str(self.__dict__)
+
+
+  @classmethod
+  def open(_project_, name, root=os.environ['HOME']):
+    info_file = f"{root}/qpm/projects/{name}/.project_info"
+    if not os.path.exists(info_file):
+      print(f"[!] Missing project info file for '{name}'!", file=sys.stderr)
+      exit(1)
+
+    version = None
+    root = None
+    build = None
+    edits = []
+
+    with open(info_file, 'r') as info:
+      info = info.readlines()
+    for line in info:
+      if line.startswith('version'):
+        version = line.replace('version ','').strip()
+
+      if line.startswith('root'):
+        root = line.replace('root ','').strip()
+
+      if line.startswith('build'):
+        build = line.replace('build ','').strip()
+
+      if line.startswith('edit'):
+        edits.append(line.replace('edit ','').strip())
+    project = _project_()
+
+    project.name = name
+    project.version = version
+    project.root = root
+    project.build = build
+    project.info_file = info_file
+    return project
+
+
+# '--init' will setup the QPM file structure.
+def Initialize(args, root=os.environ['HOME']):
+  global BUILD_TEMPLATE
+
+  if os.path.exists(f"{root}/qpm"):
+    print("[!] QPM root directory already exists.", file=sys.stderr)
+    exit(1)
+
+  dirs = [f"{root}/qpm", f"{root}/qpm/projects", f"{root}/qpm/builds", f"{root}/qpm/.runtime", f"{root}/qpm/.runtime/locks", f"{root}/qpm/.runtime/edits"]
+  for D in dirs:
+    os.mkdir(D)
+
+  with open(f"{root}/qpm/builds/.qpm_template",'w') as template:
+    template.write(BUILD_TEMPLATE)
+  print("[*] Initialization successful!")
+  exit(0)
+
+
+# 'build' command will generate the install media for the project
+def Build(args, root=os.environ['HOME']):
+  project = Project(args.project)
+  print(f"[!] Command 'build' is not yet implemented.", file=sys.stderr)
+
+
+# 'new' command will make a new project folder and increment the semver for it
+def New(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  position = ['major','minor','patch'].index(args.version)
+
+  old_version = project.version
+  version = project.version.split(".")
+  version[position] = str(int(version[position]) + 1)
+  new_version = ".".join(version)
+
+  copy_command = ['/bin/cp', '-r', f"{project.root}/{project.name}-{old_version}", f"{project.root}/{project.name}-{new_version}"]
+  copy_result = subprocess.run(copy_command,capture_output=True)
+  assert copy_result.returncode == 0, f"[!] Error code '{copy_result.returncode}' while copying previous version's contents: {copy_result.stderr}"
+  zip_command = ['/bin/zip', '-r', f"{project.root}/{project.name}-{old_version}.zip", f"{project.root}/{project.name}-{old_version}"]
+  zip_result = subprocess.run(zip_command, capture_output=True)
+  assert zip_result.returncode == 0, f"[!] Error code '{zip_result.returncode}' while compressing previous version's contents: {zip_result.stderr}"
+  remove_command = ['/bin/rm', '-rf', f"{project.root}/{project.name}-{old_version}"]
+  remove_result = subprocess.run(remove_command, capture_output=True)
+  assert remove_result.returncode == 0, f"[!] Error code '{remove_result.returncode}' while compressing previous version's contents: {remove_result.stderr}"
+
+
+  with open(project.info_file, 'w') as info:
+    info.write(f"version {new_version}\n")
+    info.write(f"root {project.root}\n")
+    info.write(f"build {project.build}\n")
+
+  print(f"[*] Version {new_version} created.")
+
+
+# 'create' command will create an entirely new project
+def Create(args, root=os.environ['HOME']):
+  project = args.project
+  project_path = f"{root}/qpm/projects/{project}"
+  build_path = f"{root}/qpm/builds/{project}.qpm"
+  if os.path.exists(project_path):
+    if args.interactive:
+      print(f"[!] Project '{project}' already exists!", file=sys.stderr)
+      print(f"[?] Make new version of it? (Y/N)", file=sys.stderr)
+      response = input()
+      if response.lower() == "y":
+        New(args)
+        exit(0)
+      else:
+        print("Exiting QPM...")
+        exit(1)
+    else:
+      print(f"[!] Project '{project}' already exists!", file=sys.stderr)
+      exit(1)
+
+  try:
+    os.mkdir(project_path)
+    os.mkdir(f"{project_path}/{project}-0.0.0")
+    copy_command = ['/bin/cp', f'{root}/qpm/builds/.qpm_template', build_path]
+    copy_result = subprocess.run(copy_command, capture_output=True)
+    assert copy_result.returncode == 0, "[!] Creation of build file returned an error."
+    with open(f"{project_path}/.project_info", 'w') as proj_info:
+      proj_info.write("version 0.0.0\n")
+      proj_info.write(f"root {project_path}\n")
+      proj_info.write(f"build {build_path}\n")
+
+  except OSError as e:
+    print(f"[!] Unexpected kernel error while creating new project folder: {e}")
+    exit(2)
+
+  except AssertionError as e:
+    print(e)
+    exit(3)
+
+  print(f"[*] Project '{project}' created!")
+
+
+
+# 'edit' command will open an interactive bash shell in a temporary working project directory
+def Edit(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  edit_name = args.name
+  tmpdir = f"/tmp/.qpm-{os.environ['USER']}/{project.name}/{project.name}-{project.version}-{edit_name}"
+  lock_file = f"{root}/qpm/.runtime/locks/{project.name}-{project.version}-{edit_name}.qpm_lock"
+  if os.path.exists(lock_file):
+    print(f"[!] Requested edit '{edit_name}' is currently locked.", file=sys.stderr)
+    exit(1)
+
+  if not os.path.isdir(tmpdir):
+    os.makedirs(tmpdir)
+
+  origin = f"{root}/qpm/.runtime/edits/{project.name}/{project.name}-{project.version}-{edit_name}/"
+  if not os.path.isdir(origin):
+    origin = f"{project.root}/{project.name}-{project.version}/"
+
+  rsync_command = ['rsync', '-crua', origin, f"{tmpdir}/"]
+  rsync_result = subprocess.run(rsync_command, capture_output=True, check=True)
+  lock_command = ['touch', lock_file]
+  lock_result = subprocess.run(lock_command, capture_output=True, check=True)
+
+
+  shell_env = os.environ.copy()
+  shell_env['PS1'] = '[ \\u qpm \\W ]$ '
+  print(f"[+] Editing copy of '{origin}'. Use 'exit' to return to your original shell.", file=sys.__stderr__)
+  shell = subprocess.run(['/bin/bash', '--norc'], env=shell_env, cwd=tmpdir)
+  print(f"[*] Done editing '{project.name}-{edit_name}'. Use 'qpm submit {project.name} --name {edit_name}' to submit your changes back to the origin.", file=sys.__stderr__)
+  os.remove(lock_file)
+
+
+# 'submit' command will push the changes from your temporary working directory back to main
+def Submit(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  edit_name = args.name
+  tmpdir = f"/tmp/.qpm-{os.environ['USER']}/{project.name}/{project.name}-{project.version}-{edit_name}"
+  edit_dir = f"{root}/qpm/.runtime/edits/{project.name}/{project.name}-{project.version}-{edit_name}"
+  if not os.path.isdir(tmpdir):
+    print(f"[!] Cannot locate temporary working directory '{tmpdir}'!", file=sys.stderr)
+
+  if not os.path.isdir(edit_dir):
+    os.makedirs(edit_dir)
+
+  rsync_command = ['/bin/rsync', '-crua', f"{tmpdir}/", f"{edit_dir}/"]
+  rsync_result = subprocess.run(rsync_command, capture_output=True, check=True)
+  remove_command = ['/bin/rm', '-rf', tmpdir]
+  remove_result = subprocess.run(remove_command, capture_output=True, check=True)
+  print("[*] Edits submitted!")
+
+
+# 'rollback' command will unzip a previous version of the project and make it the main version
+def Rollback(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  print("[!] Command 'rollback' is not yet implemented.", file=sys.stderr)
+
+
+# 'apply' command will update the true origin with changes from the edit
+def Apply(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  edit_name = args.name
+  edit_dir = f"{root}/qpm/.runtime/edits/{project.name}/{project.name}-{project.version}-{edit_name}"
+  if not os.path.isdir(edit_dir):
+    print("[!] Requested edit does not exist!", file=sys.stderr)
+    exit(1)
+
+  rsync_command = ['/bin/rsync', '-cruva', f"{edit_dir}/", f"{project.root}/{project.name}-{project.version}/"]
+  rsync_result = subprocess.run(rsync_command, check=True)
+  print("[*] Done applying updates!")
+
+
+
+
+# 'replace' command will completely replace a project's true origin with an edit
+def Replace(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  edit_name = args.name
+  edit_dir = f"{root}/qpm/.runtime/edits/{project.name}/{project.name}-{project.version}-{edit_name}"
+  if not os.path.isdir(edit_dir):
+    print("[!] Requested edit does not exist!", file=sys.stderr)
+    exit(1)
+
+  print(f"[WARNING] All contents of {project.root}/{project.name}-{project.version} will be removed and replaced with the contents of {edit_dir}.\nEnter the project and edit name '{project.name}-{edit_name} to confirm:", file=sys.__stderr__)
+  confirm = input()
+  if confirm != f"{project.name}-{edit_name}":
+    print(f"[!] Confirmation failed, bailing out.", file=sys.__stderr__)
+    exit(2)
+
+  replace_command = ['/bin/rsync', '-av', '--delete', f"{edit_dir}/", f"{project.root}/{project.name}-{project.version}/"]
+  replace_result = subprocess.run(replace_command, check=True, capture_output=True)
+  print("[*] Done replacing origin!")
+
+
+
+def Delete(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  edit_dir = f"{root}/qpm/.runtime/edits/{project.name}"
+  tmpdir = f"/tmp/.qpm-{os.environ['USER']}/{project.name}"
+  print(f"[WARNING] All files for the project will be deleted. Enter the project name '{project.name}' to confirm:")
+  confirm = input()
+  if confirm != project.name:
+    print(f"[!] Confirmation failed, bailing out.", file=sys.__stderr__)
+    exit(2)
+
+  remove_these = [f"{root}/qpm/builds/{project.name}.qpm", tmpdir, edit_dir, project.root]
+  for item in remove_these:
+    if os.path.exists(item):
+      remove_result = subprocess.run(['/bin/rm', '-rf', item], check=True, capture_output=True)
+
+  print("[*] Project deleted!")
+
+
+def Check(args, root=os.environ['HOME']):
+  project = Project.open(args.project)
+  print(f"[CHECK] Running checks for '{project.name}'...",file=sys.stderr)
+  ### TODO: Add actual checks in here for project directory structure integrity.
+  print(f"[CHECK] Project info: {project}")
+
+
+
+
+parser = argparse.ArgumentParser(
+  prog="qpm",
+  description="Quick Project Manager (QPM) manages localized semver projects.",
+  epilog="")
+parser.add_argument('--init', help="Initialize QPM project management structure.", action='store_true')
+
+subparsers = parser.add_subparsers(help="Commands for QPM.", dest='source')
+
+###
+build_parser = subparsers.add_parser('build', aliases=['b'], help="Build install materials for a project.")
+build_parser.set_defaults(func=Build)
+build_parser.add_argument('project', help="The project name.")
+
+
+###
+new_parser = subparsers.add_parser('new', aliases=['n'], help="Make a new version folder for a project and compress previous version.")
+new_parser.set_defaults(func=New)
+new_parser.add_argument('project', help="The project name.")
+new_parser.add_argument('-v', '--version', help="The version part to increment. Default is 'patch'.", choices=['major','minor','patch'], default='patch')
+
+###
+create_parser = subparsers.add_parser('create', aliases=['c'], help="Make an entirely new project.")
+create_parser.set_defaults(func=Create)
+create_parser.add_argument('project', help="The project name.")
+
+
+###
+edit_parser = subparsers.add_parser('edit', aliases=['e'], help="Open a temporary directory for editing a project.")
+edit_parser.set_defaults(func=Edit)
+edit_parser.add_argument('project', help="The project name.")
+edit_parser.add_argument('--name', help="The unique name for your editing branch.", default="main")
+
+
+###
+submit_parser = subparsers.add_parser('submit', aliases=['s'], help="Submit changes back to the source.")
+submit_parser.set_defaults(func=Submit)
+submit_parser.add_argument('project', help="The project name.")
+submit_parser.add_argument('--name', help="The unique name for your editing branch.", default="main")
+
+
+###
+check_parser = subparsers.add_parser('check', help="Verify integrity of a project structure.")
+check_parser.set_defaults(func=Check)
+check_parser.add_argument('project', help="The project name.")
+
+
+###
+apply_parser = subparsers.add_parser('apply', aliases=['a'], help="Update true project origin with changes from an edit.")
+apply_parser.set_defaults(func=Apply)
+apply_parser.add_argument('project', help="The project name.")
+apply_parser.add_argument('--name', help="The unique name for your editing branch.", default="main")
+
+
+###
+replace_parser = subparsers.add_parser('replace', aliases=['r'], help="Replace a project's true origin with an edit.")
+replace_parser.set_defaults(func=Replace)
+replace_parser.add_argument('project', help="The project name.")
+replace_parser.add_argument('--name', help="The unique name for your editing branch.", default="main")
+
+
+###
+delete_parser = subparsers.add_parser('delete', aliases=['d'], help="Delete an entire project.")
+delete_parser.set_defaults(func=Delete)
+delete_parser.add_argument('project', help="The project name.")
+
+
+if __name__ == "__main__":
+  args = parser.parse_args()
+  setattr(args, 'interactive', os.isatty(sys.stdout.fileno()))
+
+  if args.init:
+    Initialize(args)
+  else:
+    args.func(args)
