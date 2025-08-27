@@ -89,7 +89,7 @@ jepebu@Ubuntu-Server:~$ Terminal 2 -
 
 ## Planned additions
 - build
-- - After I decide how I want to format the build files, this command will be used to generate installation media for a project from its given build file.
+  - After I decide how I want to format the build files, this command will be used to generate installation media for a project from its given build file.
 - rollback
-- - This will handle unzipping a previous version of the project and re-establishing it as the main project version.
+  - This will handle unzipping a previous version of the project and re-establishing it as the main project version.
 
