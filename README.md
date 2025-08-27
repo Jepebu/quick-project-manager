@@ -1,8 +1,10 @@
 # Quick Project Manager (qpm)
 ### Manage locally stored projects in a repeatable and scalable fashion.
 
-<b>qpm</b> is designed mostly for my own convenience. It functions as a sort of mini version control interface that handles basic functions such as:
-- Creating temporary edited version of a project before submitting them to the source.
+This was designed and created mostly for my own convenience. I made this in like one afternoon out of frustration so don't judge it too harshly.
+
+<b>qpm</b> functions as a sort of mini version control interface that handles basic functions such as:
+- Creating temporary edited versions of a project before submitting them to the source.
 - Having multiple independently edited copies of the source.
 - Maintaining locks for different edits and versions of a project.
 - Creating new versions of projects which adhere to sem-ver.
